@@ -5,10 +5,13 @@ from dqn_model import DQN
 from dqn_learn import OptimizerSpec, dqn_learing
 from utils.gym import get_env, get_wrapper_by_name
 from utils.schedule import LinearSchedule
+from utils.seed import set_global_seeds
+from gym import wrappers
+from utils.atari_wrapper import *
 
 BATCH_SIZE = 32
 GAMMA = 0.99
-REPLAY_BUFFER_SIZE = 1000000
+REPLAY_BUFFER_SIZE = 100000
 LEARNING_STARTS = 50000
 LEARNING_FREQ = 4
 FRAME_HISTORY_LEN = 4
@@ -46,15 +49,28 @@ def main(env, num_timesteps):
         target_update_freq=TARGER_UPDATE_FREQ,
     )
 
+def get_env2(env_name, seed):
+
+    env = gym.make(env_name)
+
+    set_global_seeds(seed)
+    env.seed(seed)
+
+    expt_dir = 'tmp/gym-results'
+    env = wrappers.Monitor(env, expt_dir, force=True)
+    # env = wrap_deepmind(env)
+
+    return env
+
 if __name__ == '__main__':
     # Get Atari games.
-    benchmark = gym.benchmark_spec('Atari40M')
+    # benchmark = gym.benchmark_spec('Atari40M')
 
-    # Change the index to select a different game.
-    task = benchmark.tasks[3]
-
+    # # Change the index to select a different game.
+    # task = benchmark.tasks[3]
+    # env=gym.make('Breakout-v0')
     # Run training
     seed = 0 # Use a seed of zero (you may want to randomize the seed!)
-    env = get_env(task, seed)
+    env = get_env2('MsPacman-v0', seed)
 
-    main(env, task.max_timesteps)
+    main(env, 1000000)

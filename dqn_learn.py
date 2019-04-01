@@ -17,6 +17,9 @@ import torch.autograd as autograd
 from utils.replay_buffer import ReplayBuffer
 from utils.gym import get_wrapper_by_name
 
+
+import os
+
 USE_CUDA = torch.cuda.is_available()
 dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 
@@ -50,7 +53,8 @@ def dqn_learing(
     learning_starts=50000,
     learning_freq=4,
     frame_history_len=4,
-    target_update_freq=10000
+    target_update_freq=10000,
+    save_dir ='checkpoints'
     ):
 
     """Run Deep Q-learning algorithm.
@@ -97,6 +101,8 @@ def dqn_learing(
     assert type(env.observation_space) == gym.spaces.Box
     assert type(env.action_space)      == gym.spaces.Discrete
 
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
     ###############
     # BUILD MODEL #
     ###############
@@ -113,12 +119,15 @@ def dqn_learing(
     def select_epilson_greedy_action(model, obs, t):
         sample = random.random()
         eps_threshold = exploration.value(t)
-        if sample > eps_threshold:
-            obs = torch.from_numpy(obs).type(dtype).unsqueeze(0) / 255.0
-            # Use volatile = True if variable is only used in inference mode, i.e. don’t save the history
-            return model(Variable(obs, volatile=True)).data.max(1)[1].cpu()
-        else:
-            return torch.IntTensor([[random.randrange(num_actions)]])
+        with torch.no_grad():
+            if sample > eps_threshold:
+                # print('upper')
+                obs = torch.from_numpy(obs).type(dtype).unsqueeze(0) / 255.0
+                # Use volatile = True if variable is only used in inference mode, i.e. don’t save the history
+                return model(obs).data.max(1)[1].cpu()
+            else:
+                # print('lower')
+                return torch.IntTensor([[random.randrange(num_actions)]])
 
     # Initialize target q function and q function
     Q = q_func(input_arg, num_actions).type(dtype)
@@ -137,7 +146,9 @@ def dqn_learing(
     mean_episode_reward = -float('nan')
     best_mean_episode_reward = -float('inf')
     last_obs = env.reset()
-    LOG_EVERY_N_STEPS = 10000
+    last_obs = last_obs[:160,:,:]
+    print(last_obs.shape)
+    LOG_EVERY_N_STEPS = 40000
 
     for t in count():
         ### Check stopping criterion
@@ -155,18 +166,24 @@ def dqn_learing(
 
         # Choose random action if not yet start learning
         if t > learning_starts:
-            action = select_epilson_greedy_action(Q, recent_observations, t)[0, 0]
+            action = select_epilson_greedy_action(Q, recent_observations, t).item()
         else:
             action = random.randrange(num_actions)
         # Advance one step
         obs, reward, done, _ = env.step(action)
+        obs = obs[:160,:]
+
         # clip rewards between -1 and 1
         reward = max(-1.0, min(reward, 1.0))
         # Store other info in replay memory
         replay_buffer.store_effect(last_idx, action, reward, done)
         # Resets the environment when reaching an episode boundary.
         if done:
+            print('end of episode')
+
             obs = env.reset()
+            obs = obs[:160,:]
+
         last_obs = obs
 
         ### Perform experience replay and train the network.
@@ -200,7 +217,7 @@ def dqn_learing(
             next_max_q = target_Q(next_obs_batch).detach().max(1)[0]
             next_Q_values = not_done_mask * next_max_q
             # Compute the target of the current Q values
-            target_Q_values = rew_batch + (gamma * next_Q_values)
+            target_Q_values = (rew_batch + (gamma * next_Q_values)).unsqueeze(1)
             # Compute Bellman error
             bellman_error = target_Q_values - current_Q_values
             # clip the bellman error between [-1 , 1]
@@ -210,7 +227,7 @@ def dqn_learing(
             # Clear previous gradients before backward pass
             optimizer.zero_grad()
             # run backward pass
-            current_Q_values.backward(d_error.data.unsqueeze(1))
+            current_Q_values.backward(d_error.data)
 
             # Perfom the update
             optimizer.step()
@@ -238,7 +255,13 @@ def dqn_learing(
             print("exploration %f" % exploration.value(t))
             sys.stdout.flush()
 
+            PATH = os.path.join(save_dir, 'params'+str(t)+'.pt')
+            torch.save(target_Q.state_dict(), PATH)
+
             # Dump statistics to pickle
             with open('statistics.pkl', 'wb') as f:
                 pickle.dump(Statistic, f)
                 print("Saved to %s" % 'statistics.pkl')
+
+
+
